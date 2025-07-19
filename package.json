@@ -1,0 +1,33 @@
+{
+  "name": "kanuni-openai",
+  "version": "0.0.1",
+  "description": "OpenAI formatters for Kanuni query builder framework",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "type": "module",
+  "author": "Erek Gokturk",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "build-watch": "tsc -w",
+    "build-npm": "npm run build && cp package.json LICENSE.md README.md build",
+    "test": "jest",
+    "test-watch": "jest --watch",
+    "compile-type-tests": "tsc --project tsconfig.compile-tests.json",
+    "prod-build": "tsc --sourceMap false --declarationMap false --declaration false",
+    "publish-npm": "npm run build-npm && cd build && npm publish && cd -",
+    "clean": "rm -rf build"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.14",
+    "@types/node": "^24.0.13",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
+  }
+}
