@@ -5,6 +5,6 @@
   "compilerOptions": {
     /* Visit https://aka.ms/tsconfig to read more about this file */
     "noEmit": true /* Disable emitting files from a compilation. */,
-    "rootDir": ".." /* Specify the root folder within your source files. */
+    "rootDir": ".." /* Specify the root folder within your source files. */,
   }
 }

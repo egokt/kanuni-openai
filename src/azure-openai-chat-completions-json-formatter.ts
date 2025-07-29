@@ -3,20 +3,24 @@ import type {
   Query,
 } from "kanuni";
 import { TextualMarkdownFormatter } from "kanuni";
+import { JsonOutput } from "kanuni/developer-api/types.js";
 import { AzureOpenAI } from "openai";
+import { zodResponseFormat } from "openai/helpers/zod.js";
+import { AutoParseableResponseFormat } from "openai/lib/parser.js";
 import { ChatCompletionRole } from "openai/resources";
+import { ZodType } from "zod";
 
-type InstructionsFormatterFunction<
+export type InstructionsFormatterFunction<
   OutputSchema extends Record<string, any> = Record<string, any>,
   Role extends string = ChatCompletionRole
 > = (query: Query<OutputSchema, Role>) => string;
 
-type RoleMapperFunction<SourceRole extends string> =
+export type RoleMapperFunction<SourceRole extends string> =
   (sourceRole: SourceRole, name?: string) => ChatCompletionRole;
 
 type InstructionsRole = 'developer' | 'system';
 
-type AzureOpenAIChatCompletionsJsonFormatterConfig<
+export type AzureOpenAIChatCompletionsJsonFormatterConfig<
   OutputSchema extends Record<string, any>,
   Role extends string = ChatCompletionRole
 > = {
@@ -81,24 +85,24 @@ function identityRoleMapper(sourceRole: ChatCompletionRole): ChatCompletionRole 
   throw new Error(`Unknown role: ${sourceRole}`);
 }
 
-export class AzureOpenAIChatCompletionsJsonFormatter<OutputSchema extends Record<string, any>>
+export class AzureOpenAIChatCompletionsJsonFormatter<OutputType extends Record<string, any>>
   implements Formatter<
     AzureOpenAIChatCompletionsJsonFormatterParams,
     AzureOpenAIChatCompletionsJsonFormatterResult,
-    OutputSchema,
+    OutputType,
     Role
   >
 {
   private instructionsRole: InstructionsRole;
-  private instructionsFormatter: InstructionsFormatterFunction<OutputSchema, Role>;
+  private instructionsFormatter: InstructionsFormatterFunction<OutputType, Role>;
   private roleMapper: RoleMapperFunction<Role>;
 
   constructor(
     {
       instructionsRole = DEFAULT_INSTRUCTIONS_ROLE,
-      instructionsFormatter = (query) => new TextualMarkdownFormatter<OutputSchema, Role>().format(query),
+      instructionsFormatter = (query) => new TextualMarkdownFormatter<OutputType, Role>().format(query),
       roleMapper = identityRoleMapper,
-    }: AzureOpenAIChatCompletionsJsonFormatterConfig<OutputSchema, Role> = {},
+    }: AzureOpenAIChatCompletionsJsonFormatterConfig<OutputType, Role> = {},
   ) {
     this.instructionsRole = instructionsRole;
     this.instructionsFormatter = instructionsFormatter;
@@ -106,7 +110,7 @@ export class AzureOpenAIChatCompletionsJsonFormatter<OutputSchema extends Record
  }
 
   format(
-    query: Query<OutputSchema, Role>,
+    query: Query<OutputType, Role>,
     params: AzureOpenAIChatCompletionsJsonFormatterParams = {},
   ): AzureOpenAIChatCompletionsJsonFormatterResult {
     const memoryItems = this.formatMemoryItems(query, params);
@@ -121,7 +125,7 @@ export class AzureOpenAIChatCompletionsJsonFormatter<OutputSchema extends Record
   // Warn: This method only supports utterances in the memory section.
   // TODO: Extend this to support other types of memory items, i.e. tools, when they are implemented.
   private formatMemoryItems(
-    query: Query<OutputSchema, Role>,
+    query: Query<OutputType, Role>,
     _params: AzureOpenAIChatCompletionsJsonFormatterParams,
   ): AzureOpenAIChatCompletionsJsonFormatterResult['messages'] {
     const instructionsRole = this.instructionsRole;
@@ -154,25 +158,69 @@ export class AzureOpenAIChatCompletionsJsonFormatter<OutputSchema extends Record
   }
 
   private formatJsonSchema(
-    query: Query<OutputSchema, Role>,
-    params: AzureOpenAIChatCompletionsJsonFormatterParams,
-  ): AzureOpenAIChatCompletionsJsonFormatterResult['response_format'] {
-    // This method should format the JSON schema based on the query and params.
-    // For now, we return an empty object as a placeholder.
-    query;
-    params;
-    return {
-      // TODO: Support 'json_objet' response format for models that do not
-      // support 'json_schema', or if the caller explicitly requests it.
-      type: 'json_schema',
+    query: Query<OutputType, Role>,
+    _params: AzureOpenAIChatCompletionsJsonFormatterParams,
+  ): AutoParseableResponseFormat<OutputType> {
+    // This formatter is designed to work with queries that have a json output.
+    // If the query does not have output schema set, throw an error.
+    const output = query.output;
+    if (output?.type !== 'output-json') {
+      throw new Error(
+        `Query output type must be 'output-json', but ` +
+          output !== undefined
+          ? `got '${(output as { type: string }).type}'`
+          : 'output is left as default (text)'
+      );
+    }
 
-      json_schema: {
-        name: 'response_schema',
-        
-        // FIXME: This is a placeholder schema. Replace with actual schema logic.
-        description: 'Schema for the response',
-      }
-    };
+    // const jsonSchema = zodToJsonSchema(output.schema, {
+    //   name: output.schemaName,
+    //   // target: 'openAi',
+    //   postProcess: jsonDescription,
+    // });
+
+    const jsonOutput = output as JsonOutput<OutputType>; // this is because typescript somehow can't infer this type
+    return zodResponseFormat<ZodType<OutputType>>(
+      jsonOutput.schema,
+      jsonOutput.schemaName,
+    );
+
+    // return makeParseableResponseFormat<OutputType>(
+    //   {
+    //     type: 'json_schema',
+    //     json_schema: {
+    //       name: output.schemaName,
+    //       strict: true,
+    //       schema: zodToJsonSchema(output.schema, {
+    //         openaiStrictMode: true,
+    //         nameStrategy: 'duplicate-ref',
+    //         $refStrategy: 'extract-to-root',
+    //         nullableStrategy: 'property',
+    //         name: output.schemaName,
+    //         postProcess: jsonDescription,
+    //       }).definitions![output.schemaName],
+    //     },
+    //   },
+    //   (content) => output.schema.parse(JSON.parse(content)) as OutputType,
+    // );
+
+    // return {
+    //   // TODO: Support 'json_object' response format for models that do not
+    //   // support 'json_schema', or if the caller explicitly requests it.
+    //   type: 'json_schema',
+
+    //   json_schema: {
+    //     name: output.schemaName,
+    //     description: output.schema.description,
+    //     strict: true,
+    //     schema: jsonSchema.definitions,
+    //   }
+    //   // json_schema: {
+    //   //   ...jsonSchema,
+    //   //   name: output.schemaName,
+    //   //   description: output.schema.description,
+    //   //   strict: true,
+    //   // }
+    // };
   }
-
 }
