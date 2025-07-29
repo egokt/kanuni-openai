@@ -173,54 +173,10 @@ export class AzureOpenAIChatCompletionsJsonFormatter<OutputType extends Record<s
       );
     }
 
-    // const jsonSchema = zodToJsonSchema(output.schema, {
-    //   name: output.schemaName,
-    //   // target: 'openAi',
-    //   postProcess: jsonDescription,
-    // });
-
     const jsonOutput = output as JsonOutput<OutputType>; // this is because typescript somehow can't infer this type
     return zodResponseFormat<ZodType<OutputType>>(
       jsonOutput.schema,
       jsonOutput.schemaName,
     );
-
-    // return makeParseableResponseFormat<OutputType>(
-    //   {
-    //     type: 'json_schema',
-    //     json_schema: {
-    //       name: output.schemaName,
-    //       strict: true,
-    //       schema: zodToJsonSchema(output.schema, {
-    //         openaiStrictMode: true,
-    //         nameStrategy: 'duplicate-ref',
-    //         $refStrategy: 'extract-to-root',
-    //         nullableStrategy: 'property',
-    //         name: output.schemaName,
-    //         postProcess: jsonDescription,
-    //       }).definitions![output.schemaName],
-    //     },
-    //   },
-    //   (content) => output.schema.parse(JSON.parse(content)) as OutputType,
-    // );
-
-    // return {
-    //   // TODO: Support 'json_object' response format for models that do not
-    //   // support 'json_schema', or if the caller explicitly requests it.
-    //   type: 'json_schema',
-
-    //   json_schema: {
-    //     name: output.schemaName,
-    //     description: output.schema.description,
-    //     strict: true,
-    //     schema: jsonSchema.definitions,
-    //   }
-    //   // json_schema: {
-    //   //   ...jsonSchema,
-    //   //   name: output.schemaName,
-    //   //   description: output.schema.description,
-    //   //   strict: true,
-    //   // }
-    // };
   }
 }

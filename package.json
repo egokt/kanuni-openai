@@ -11,8 +11,8 @@
     "build": "tsc",
     "build-watch": "tsc -w",
     "build-npm": "npm run build && cp package.json LICENSE.md README.md build",
-    "test": "jest",
-    "test-watch": "jest --watch",
+    "test": "NODE_OPTIONS=\"--experimental-vm-modules\" npx jest",
+    "test-watch": "NODE_OPTIONS=\"--experimental-vm-modules\" npx jest --watch",
     "compile-type-tests": "tsc --project tsconfig.compile-tests.json",
     "prod-build": "tsc --sourceMap false --declarationMap false --declaration false",
     "publish-npm": "npm run build-npm && cd build && npm publish && cd -",
@@ -27,9 +27,8 @@
     "typescript": "^5.6.3"
   },
   "dependencies": {
-    "kanuni": "^0.0.1",
+    "kanuni": "^0.0.2",
     "openai": "^5.10.2",
-    "zod": "^3.25.76",
-    "zod-to-json-schema": "^3.24.6"
+    "zod": "^3.25.76"
   }
 }

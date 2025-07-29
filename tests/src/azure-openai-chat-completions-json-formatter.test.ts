@@ -1,7 +1,8 @@
-import { ChatCompletionUserMessageParam } from "openai/resources";
+import { ChatCompletionRole, ChatCompletionUserMessageParam } from "openai/resources";
 import { AzureOpenAIChatCompletionsJsonFormatter } from "../../src/azure-openai-chat-completions-json-formatter.js";
 import { z } from "zod";
 import { Kanuni } from "kanuni";
+import { jest } from '@jest/globals';
 
 describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
   const schemaName = "TestSchema";
@@ -46,7 +47,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
   });
 
   it("should correctly map roles using a custom roleMapper", () => {
-    const roleMapper = jest.fn((role) => (role === "user" ? "assistant" : role));
+    const roleMapper = jest.fn((role: ChatCompletionRole) => (role === "user" ? "assistant" : role));
     const formatter = new AzureOpenAIChatCompletionsJsonFormatter({ roleMapper });
     // prettier-ignore
     const query = Kanuni.newQuery()
