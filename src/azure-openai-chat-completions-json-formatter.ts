@@ -13,7 +13,7 @@ import { ZodType } from "zod";
 export type InstructionsFormatterFunction<
   OutputSchema extends Record<string, any> = Record<string, any>,
   Role extends string = ChatCompletionRole
-> = (query: Query<OutputSchema, Role>) => string;
+> = (query: Query<OutputSchema, Role, any>) => string;
 
 export type RoleMapperFunction<SourceRole extends string> =
   (sourceRole: SourceRole, name?: string) => ChatCompletionRole;
@@ -110,7 +110,7 @@ export class AzureOpenAIChatCompletionsJsonFormatter<OutputType extends Record<s
  }
 
   format(
-    query: Query<OutputType, Role>,
+    query: Query<OutputType, Role, any>,
     params: AzureOpenAIChatCompletionsJsonFormatterParams = {},
   ): AzureOpenAIChatCompletionsJsonFormatterResult {
     const memoryItems = this.formatMemoryItems(query, params);
@@ -125,7 +125,7 @@ export class AzureOpenAIChatCompletionsJsonFormatter<OutputType extends Record<s
   // Warn: This method only supports utterances in the memory section.
   // TODO: Extend this to support other types of memory items, i.e. tools, when they are implemented.
   private formatMemoryItems(
-    query: Query<OutputType, Role>,
+    query: Query<OutputType, Role, any>,
     _params: AzureOpenAIChatCompletionsJsonFormatterParams,
   ): AzureOpenAIChatCompletionsJsonFormatterResult['messages'] {
     const instructionsRole = this.instructionsRole;
@@ -158,7 +158,7 @@ export class AzureOpenAIChatCompletionsJsonFormatter<OutputType extends Record<s
   }
 
   private formatJsonSchema(
-    query: Query<OutputType, Role>,
+    query: Query<OutputType, any, any>,
     _params: AzureOpenAIChatCompletionsJsonFormatterParams,
   ): AutoParseableResponseFormat<OutputType> {
     // This formatter is designed to work with queries that have a json output.
