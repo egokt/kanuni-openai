@@ -1,33 +1,51 @@
 import type {
   Formatter,
+  JsonOutput,
   Query,
+  Tool,
+  ToolCall,
 } from "kanuni";
 import { TextualMarkdownFormatter } from "kanuni";
-import { JsonOutput } from "kanuni/developer-api/types.js";
 import { AzureOpenAI } from "openai";
 import { zodResponseFormat } from "openai/helpers/zod.js";
 import { AutoParseableResponseFormat } from "openai/lib/parser.js";
-import { ChatCompletionRole } from "openai/resources";
+import {
+  ChatCompletionAssistantMessageParam,
+  ChatCompletionMessageToolCall,
+  ChatCompletionRole,
+  ChatCompletionToolMessageParam,
+  ChatCompletionUserMessageParam,
+} from "openai/resources";
 import { ZodType } from "zod";
+
+const SUPPORTED_ROLES = ['user', 'assistant'] as const;
+type SupportedRoles = (typeof SUPPORTED_ROLES)[number];
+
+// The following checks to make sure that we continue to stay in alignment with
+// the openai library
+type ChatCompletionUtteranceRoles = Extract<ChatCompletionRole, SupportedRoles>;
+
+type SupportedInstructionsRoles= 'developer' | 'system';
+type ChatCompletionInstructionsRoles = Extract<ChatCompletionRole, SupportedInstructionsRoles>;
 
 export type InstructionsFormatterFunction<
   OutputSchema extends Record<string, any> = Record<string, any>,
-  Role extends string = ChatCompletionRole
-> = (query: Query<OutputSchema, Role, any>) => string;
+  Role extends string = ChatCompletionUtteranceRoles,
+  ToolsType extends Tool<any, any> = never
+> = (query: Query<OutputSchema, Role, ToolsType>) => string;
 
 export type RoleMapperFunction<SourceRole extends string> =
-  (sourceRole: SourceRole, name?: string) => ChatCompletionRole;
-
-type InstructionsRole = 'developer' | 'system';
+  (sourceRole: SourceRole, name?: string) => ChatCompletionUtteranceRoles;
 
 export type AzureOpenAIChatCompletionsJsonFormatterConfig<
   OutputSchema extends Record<string, any>,
-  Role extends string = ChatCompletionRole
+  Role extends string = ChatCompletionUtteranceRoles,
+  ToolsType extends Tool<any, any> = never
 > = {
   /**
    * Post o1 models use "developer", others use "system". Default is "system". Check which role your model uses for instructions.
    */
-  instructionsRole?: InstructionsRole;
+  instructionsRole?: ChatCompletionInstructionsRoles;
 
   // TODO: add model and version params so that the formatter can adapt to different OpenAI models and versions.
 
@@ -40,126 +58,295 @@ export type AzureOpenAIChatCompletionsJsonFormatterConfig<
    * @param query The query to format instructions for.
    * @returns The formatted instructions.
    */
-  instructionsFormatter?: InstructionsFormatterFunction<OutputSchema, Role>;
+  instructionsFormatter?: InstructionsFormatterFunction<OutputSchema, Role, ToolsType>;
 
   roleMapper?: RoleMapperFunction<Role>;
 }
 
-const DEFAULT_INSTRUCTIONS_ROLE: InstructionsRole = "system";
+const DEFAULT_INSTRUCTIONS_ROLE: ChatCompletionInstructionsRoles = "system";
 
 type AzureOpenAIChatCompletionsJsonFormatterParams = {};
 
 type AzureOpenAIChatCompletionsJsonFormatterResult =
   Pick<Parameters<
     AzureOpenAI['chat']['completions']['parse']>[0],
-    'messages' | 'response_format'
+    'messages' | 'response_format' | 'tools'
   >;
 
-type Role = ChatCompletionRole;
-type UtteranceRole = 'user' | 'assistant';
-
-// This is for ensuring that the build of this package fails
-// if a new role is added to the OpenAI API
-const ALL_CHAT_COMPLETION_ROLES: { [key in ChatCompletionRole]: boolean } = {
-  user: true,
-  assistant: true,
-  system: true,
-  developer: true,
-  function: true,
-  tool: true,
-};
-
-const UTTERANCE_ROLES: { [key in ChatCompletionRole]: boolean } = {
-  user: true,
-  assistant: true,
-  system: false,
-  developer: false,
-  function: false,
-  tool: false,
-};
-
-function identityRoleMapper(sourceRole: ChatCompletionRole): ChatCompletionRole {
-  if (ALL_CHAT_COMPLETION_ROLES[sourceRole]) {
-    return sourceRole;
-  }
-  throw new Error(`Unknown role: ${sourceRole}`);
-}
-
-export class AzureOpenAIChatCompletionsJsonFormatter<OutputType extends Record<string, any>>
-  implements Formatter<
+export class AzureOpenAIChatCompletionsJsonFormatter<
+  OutputType extends Record<string, any>,
+  ToolsType extends Tool<any, any> = never,
+  Role extends string = ChatCompletionUtteranceRoles,
+> implements Formatter<
     AzureOpenAIChatCompletionsJsonFormatterParams,
     AzureOpenAIChatCompletionsJsonFormatterResult,
     OutputType,
-    Role
+    Role,
+    ToolsType
   >
 {
-  private instructionsRole: InstructionsRole;
-  private instructionsFormatter: InstructionsFormatterFunction<OutputType, Role>;
+  private instructionsRole: ChatCompletionInstructionsRoles;
+  private instructionsFormatter: InstructionsFormatterFunction<OutputType, Role, ToolsType>;
   private roleMapper: RoleMapperFunction<Role>;
 
   constructor(
     {
       instructionsRole = DEFAULT_INSTRUCTIONS_ROLE,
-      instructionsFormatter = (query) => new TextualMarkdownFormatter<OutputType, Role>().format(query),
-      roleMapper = identityRoleMapper,
-    }: AzureOpenAIChatCompletionsJsonFormatterConfig<OutputType, Role> = {},
+      instructionsFormatter = (query: Query<OutputType, Role, ToolsType>) => new TextualMarkdownFormatter<OutputType, Role, ToolsType>().format(query),
+      roleMapper = this.identityRoleMapper,
+    }: AzureOpenAIChatCompletionsJsonFormatterConfig<OutputType, Role, ToolsType> = {},
   ) {
     this.instructionsRole = instructionsRole;
     this.instructionsFormatter = instructionsFormatter;
     this.roleMapper = roleMapper;
- }
+  }
+
+  private identityRoleMapper(sourceRole: Role): SupportedRoles {
+    const mappedRole = SUPPORTED_ROLES.find(role => role === sourceRole);
+    if (mappedRole !== undefined) {
+      return mappedRole;
+    }
+    throw new Error(`Unknown role: ${sourceRole}`);
+  }
 
   format(
-    query: Query<OutputType, Role, any>,
-    params: AzureOpenAIChatCompletionsJsonFormatterParams = {},
+    query: Query<OutputType, Role, ToolsType>,
+    _params: AzureOpenAIChatCompletionsJsonFormatterParams = {},
   ): AzureOpenAIChatCompletionsJsonFormatterResult {
-    const memoryItems = this.formatMemoryItems(query, params);
-    const responseJsonSchema = this.formatJsonSchema(query, params);
+    const memoryItems = this.formatMemoryItems(query);
+    const responseJsonSchema = this.formatJsonSchema(query);
+    const tools = this.formatTools(query);
 
     return {
       messages: memoryItems,
       response_format: responseJsonSchema,
+      tools,
     };
+  }
+
+  formatTools(
+    query: Query<OutputType, Role, ToolsType>
+  ): AzureOpenAIChatCompletionsJsonFormatterResult['tools'] {
+    const toolRegistry = query.tools;
+
+    if (toolRegistry === undefined || Object.keys(toolRegistry).length === 0) {
+      return [];
+    }
+
+    return Object.values(toolRegistry).map(tool => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      }
+    }));
   }
 
   // Warn: This method only supports utterances in the memory section.
   // TODO: Extend this to support other types of memory items, i.e. tools, when they are implemented.
   private formatMemoryItems(
-    query: Query<OutputType, Role, any>,
-    _params: AzureOpenAIChatCompletionsJsonFormatterParams,
+    query: Query<OutputType, Role, ToolsType>,
   ): AzureOpenAIChatCompletionsJsonFormatterResult['messages'] {
     const instructionsRole = this.instructionsRole;
     const instructions = this.instructionsFormatter(query);
+
+    let lastGroup:
+      | {
+        // this type is for user utterance
+
+        type: 'user',
+        utteranceItem: Extract<NonNullable<typeof query.memory>['contents'][number], { type: 'utterance'; }>;
+      }
+      | {
+        type: 'assistant',
+
+        // utterance may not be present if the llm chose to call tools without any accompanying text output
+        utteranceItem?: Extract<NonNullable<typeof query.memory>['contents'][number], { type: 'utterance'; }>;
+
+        toolCalls: Extract<NonNullable<typeof query.memory>['contents'][number], { type: 'tool-call'; }>[];
+      }
+      | {
+        type: 'tool-call-result',
+        toolCallResults: Extract<NonNullable<typeof query.memory>['contents'][number], { type: 'tool-call-result'; }>[];
+      }
+      | null;
+    const regroupedMemoryItems: (NonNullable<typeof lastGroup>)[] = [];
+    lastGroup = null;
+    for (const memoryItem of query.memory?.contents || []) {
+      switch (memoryItem.type) {
+        case 'utterance':
+          if (lastGroup !== null) {
+            if (lastGroup.type === 'assistant' && lastGroup.utteranceItem === undefined) {
+              // this is a bit interesting, but handle anyways:
+              // there are tool calls, then an assistance utterance in the memory
+              // combine them together as a message for the openai messages in prompt context
+              lastGroup.utteranceItem = memoryItem;
+            } else {
+              regroupedMemoryItems.push(lastGroup);
+              switch (this.roleMapper(memoryItem.role, memoryItem.name)) {
+                case 'user':
+                  lastGroup = {
+                    type: 'user',
+                    utteranceItem: memoryItem,
+                  };
+                  break;
+                case 'assistant':
+                  lastGroup = {
+                    type: 'assistant',
+                    utteranceItem: memoryItem,
+                    toolCalls: [],
+                  };
+                  break;
+                default:
+                  throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsJsonFormatter`);
+              }
+            }
+          } else {
+            switch (this.roleMapper(memoryItem.role, memoryItem.name)) {
+              case 'user':
+                lastGroup = {
+                  type: 'user',
+                  utteranceItem: memoryItem,
+                };
+                break;
+              case 'assistant':
+                lastGroup = {
+                  type: 'assistant',
+                  utteranceItem: memoryItem,
+                  toolCalls: [],
+                };
+                break;
+              default:
+                throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsJsonFormatter`);
+            }
+          }
+          break;
+        case 'tool-call':
+          if (lastGroup === null) {
+            // this is a weird case: the memory starts with the assistant
+            // making a tool call
+            lastGroup = {
+              type: 'assistant',
+              toolCalls: [memoryItem],
+            };
+          } else {
+            if (lastGroup.type === 'assistant') {
+              lastGroup.toolCalls.push(memoryItem);
+            } else {
+              // we assume the last group not being an assistant utterance or
+              // tool call means the assistant did not output any text and
+              // its answer is containing only tool cals (i.e. it is starting a
+              // new answer).
+              regroupedMemoryItems.push(lastGroup);
+              lastGroup = {
+                type: 'assistant',
+                toolCalls: [memoryItem],
+              };
+            }
+          }
+          break;
+        case 'tool-call-result':
+          if (lastGroup === null) {
+            throw new Error('Memory starts with a tool call result without ' +
+              `its corresponding call. Tool call id: ${memoryItem.toolCallId}`);
+          } else {
+            if (lastGroup.type === 'tool-call-result') {
+              lastGroup.toolCallResults.push(memoryItem);
+            } else {
+              regroupedMemoryItems.push(lastGroup);
+              lastGroup = {
+                type: 'tool-call-result',
+                toolCallResults: [memoryItem],
+              };
+            }
+          }
+          break;
+        default:
+          throw new Error(`Unexpected memory type: ${(memoryItem as { type: string; }).type}`)
+      }
+    }
+    if (lastGroup !== null) {
+      regroupedMemoryItems.push(lastGroup);
+    }
 
     const memoryItems = [
       {
         role: instructionsRole,
         content: instructions,
       },
-      ...(query.memory?.contents || []).map((item) => {
+      ...regroupedMemoryItems.map(item => {
         switch (item.type) {
-          case "utterance":
-            const role = this.roleMapper(item.role, item.name);
-            if (!UTTERANCE_ROLES[role]) {
-              throw new Error(`Role mapping for '${item.role}' resulted in unknown utterance role: ${role}`);
-            }
+          case 'user':
             return {
-              role: role as UtteranceRole, // this type casting is safe due to the conditional above
-              ...(item.name !== undefined && item.name !== '' ? { name: item.name } : {}),
-              content: item.contents,
-            };
+              role: 'user',
+              content: item.utteranceItem.contents,
+              ...(item.utteranceItem.name !== undefined
+                ? { name: item.utteranceItem.name }
+                : {}),
+            } as ChatCompletionUserMessageParam;
+          case 'assistant':
+            return {
+              role: 'assistant',
+              ...(item.utteranceItem !== undefined ? { content: item.utteranceItem.contents } : {}),
+              ...(item.toolCalls.length > 0 ? { tool_calls: item.toolCalls.map(toolCall => this.formatToolCall(toolCall)) } : {})
+            } as ChatCompletionAssistantMessageParam;
+          case 'tool-call-result':
+            return item.toolCallResults.map(toolCallResult => ({
+              role: 'tool',
+              content: toolCallResult.result === null ? 'Success' : toolCallResult.result,
+              tool_call_id: toolCallResult.toolCallId,
+            } as ChatCompletionToolMessageParam));
           default:
-            throw new Error(`Unknown memory item type: ${item.type}`);
+            throw new Error(`Internal error in AzureOpenAIChatCompletionsJsonFormatter.`);
         }
-      }),
+      }).flat(),
+      // ...(query.memory?.contents || []).map((item) => {
+      //   switch (item.type) {
+      //     case "utterance":
+      //       const role = this.roleMapper(item.role, item.name);
+      //       if (!UTTERANCE_ROLES[role]) {
+      //         throw new Error(`Role mapping for '${item.role}' resulted in unknown utterance role: ${role}`);
+      //       }
+      //       return {
+      //         role: role as UtteranceRole, // this type casting is safe due to the conditional above
+      //         ...(item.name !== undefined && item.name !== '' ? { name: item.name } : {}),
+      //         content: item.contents,
+      //       };
+      //     case 'tool-call':
+      //       return {
+
+      //       };
+      //       break;
+      //     case 'tool-call-result':
+      //       break;
+      //     default:
+      //       throw new Error(`Unknown memory item type: ${item.type}`);
+      //   }
+      // }),
     ];
 
     return memoryItems;
   }
 
+  /**
+   * Convert the given tool call to the format acceptable by openai library.
+   * 
+   * @param toolCall The tool call in Kanuni format.
+   */
+  formatToolCall(toolCall: ToolCall<ToolsType["name"]>): ChatCompletionMessageToolCall {
+    return {
+      id: toolCall.toolCallId,
+      type: 'function',
+      function: {
+        name: toolCall.toolName,
+        arguments: toolCall.arguments,
+      },
+    };
+  }
+
   private formatJsonSchema(
     query: Query<OutputType, any, any>,
-    _params: AzureOpenAIChatCompletionsJsonFormatterParams,
   ): AutoParseableResponseFormat<OutputType> {
     // This formatter is designed to work with queries that have a json output.
     // If the query does not have output schema set, throw an error.
