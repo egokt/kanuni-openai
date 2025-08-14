@@ -1,15 +1,15 @@
 import { ChatCompletionRole, ChatCompletionUserMessageParam } from "openai/resources";
-import { AzureOpenAIChatCompletionsJsonFormatter } from "../../src/azure-openai-chat-completions-json-formatter.js";
+import { AzureOpenAIChatCompletionsFormatter } from "../../src/azure-openai-chat-completions-formatter.js";
 import { z } from "zod";
 import { Kanuni } from "kanuni";
 import { jest } from '@jest/globals';
 
-describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
+describe("AzureOpenAIChatCompletionsFormatter", () => {
   const schemaName = "TestSchema";
 
   describe("Basic functionality", () => {
-    it("should format a basic query with default instructions formatter", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+    it("should format a basic query with default instructions formatter (JSON output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .outputJson(z.strictObject({
@@ -29,9 +29,21 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       }
     });
 
-    it("should use the provided instructionsRole and instructionsFormatter", () => {
+    it("should format a basic query with default instructions formatter (text output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .build({});
+      const result = formatter.format(query);
+      
+      expect(result.messages[0].role).toBe("system");
+      expect(result.messages[0].content).toContain("This is a test prompt");
+      expect(result.response_format).toBeUndefined();
+    });
+
+    it("should use the provided instructionsRole and instructionsFormatter (JSON output)", () => {
       const customFormatter = jest.fn(() => "custom instructions");
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({
+      const formatter = new AzureOpenAIChatCompletionsFormatter({
         instructionsRole: "developer",
         instructionsFormatter: customFormatter,
       });
@@ -48,8 +60,25 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(customFormatter).toHaveBeenCalledWith(query);
     });
 
-    it("should handle queries with no memory contents", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+    it("should use the provided instructionsRole and instructionsFormatter (text output)", () => {
+      const customFormatter = jest.fn(() => "custom instructions");
+      const formatter = new AzureOpenAIChatCompletionsFormatter({
+        instructionsRole: "developer",
+        instructionsFormatter: customFormatter,
+      });
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .build({});
+      const result = formatter.format(query);
+      
+      expect(result.messages[0].role).toBe("developer");
+      expect(result.messages[0].content).toBe("custom instructions");
+      expect(customFormatter).toHaveBeenCalledWith(query);
+      expect(result.response_format).toBeUndefined();
+    });
+
+    it("should handle queries with no memory contents (JSON output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .outputJson(z.strictObject({
@@ -61,12 +90,24 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(result.messages.length).toBe(1);
       expect(result.messages[0].role).toBe("system");
     });
+
+    it("should handle queries with no memory contents (text output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .build({});
+      const result = formatter.format(query);
+      
+      expect(result.messages.length).toBe(1);
+      expect(result.messages[0].role).toBe("system");
+      expect(result.response_format).toBeUndefined();
+    });
   });
 
   describe("Role mapping", () => {
-    it("should correctly map roles using a custom roleMapper", () => {
+    it("should correctly map roles using a custom roleMapper (JSON output)", () => {
       const roleMapper = jest.fn((role: ChatCompletionRole) => (role === "user" ? "assistant" : 'user'));
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({ roleMapper });
+      const formatter = new AzureOpenAIChatCompletionsFormatter({ roleMapper });
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m
@@ -83,8 +124,25 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(result.messages[1].content).toBe("hi");
     });
 
+    it("should correctly map roles using a custom roleMapper (text output)", () => {
+      const roleMapper = jest.fn((role: ChatCompletionRole) => (role === "user" ? "assistant" : 'user'));
+      const formatter = new AzureOpenAIChatCompletionsFormatter({ roleMapper });
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .memory(m => m
+          .utterance("user", () => "hi" )
+        )
+        .build({});
+      const result = formatter.format(query);
+      
+      expect(roleMapper).toHaveBeenCalledWith("user", undefined);
+      expect(result.messages[1].role).toBe("assistant");
+      expect(result.messages[1].content).toBe("hi");
+      expect(result.response_format).toBeUndefined();
+    });
+
     it("should use identity role mapper by default", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m
@@ -103,7 +161,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     });
 
     it("should throw an error if a memory item maps to an invalid utterance role", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({
+      const formatter = new AzureOpenAIChatCompletionsFormatter({
         // @ts-expect-error - testing invalid role mapping
         roleMapper: () => "system",
       });
@@ -119,7 +177,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     });
 
     it("should throw an error for unknown roles in identity mapper", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m.utterance("unknown_role" as any, () => "hi"))
@@ -133,8 +191,8 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
   });
 
   describe("Memory handling", () => {
-    it("should handle single user utterance", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+    it("should handle single user utterance (JSON output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m.utterance("user", () => "hi"))
@@ -149,8 +207,22 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(result.messages[1].content).toBe("hi");
     });
 
+    it("should handle single user utterance (text output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .memory(m => m.utterance("user", () => "hi"))
+        .build({});
+      const result = formatter.format(query);
+      
+      expect(result.messages.length).toBe(2);
+      expect(result.messages[1].role).toBe("user");
+      expect(result.messages[1].content).toBe("hi");
+      expect(result.response_format).toBeUndefined();
+    });
+
     it("should handle single assistant utterance", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m.utterance("assistant", () => "hello"))
@@ -166,7 +238,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     });
 
     it("should handle multiple consecutive utterances from different roles", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m
@@ -190,7 +262,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     });
 
     it("should handle queries with named utterances", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m.utterance("user", "bob", () => "hi"))
@@ -206,7 +278,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     });
 
     it("should handle utterances without names", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m.utterance("user", () => "hi"))
@@ -224,7 +296,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
 
   describe("Tool handling", () => {
     it("should return empty tools array when no tools are provided", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .outputJson(z.strictObject({
@@ -239,7 +311,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     it("should format tools correctly when provided", () => {
       // TODO: This test needs to be implemented once we understand how Kanuni handles tools
       // For now, we'll test that the formatter handles undefined tools correctly
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .outputJson(z.strictObject({
@@ -257,9 +329,53 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     // This would require understanding how Kanuni structures tool calls in memory
   });
 
+  describe("Output type handling", () => {
+    it("should handle text output correctly", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .memory(m => m.utterance("user", () => "hello"))
+        .build({});
+      const result = formatter.format(query);
+      
+      expect(result.response_format).toBeUndefined();
+      expect(result.messages.length).toBe(2);
+      expect(result.messages[0].role).toBe("system");
+      expect(result.messages[1].role).toBe("user");
+    });
+
+    it("should handle JSON output correctly", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .memory(m => m.utterance("user", () => "hello"))
+        .outputJson(z.strictObject({
+          response: z.string().describe("The response field"),
+        }))
+        .build({});
+      const result = formatter.format(query);
+      
+      expect(result.response_format).toBeDefined();
+      expect(result.response_format?.type).toBe("json_schema");
+      expect(result.messages.length).toBe(2);
+      expect(result.messages[0].role).toBe("system");
+      expect(result.messages[1].role).toBe("user");
+    });
+
+    it("should throw error for unknown output types", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const query = {
+        prompt: { type: "prompt", contents: [] },
+        output: { type: "unknown-output-type" },
+      } as any;
+      
+      expect(() => formatter.format(query)).toThrow(/Unknown output type: unknown-output-type/);
+    });
+  });
+
   describe("JSON Schema handling", () => {
     it("should include the correct JSON schema in response_format", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .outputJson(z.strictObject({
@@ -280,7 +396,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     });
 
     it("should handle JSON schema without explicit name", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .outputJson(z.strictObject({
@@ -294,32 +410,11 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
         expect(result.response_format.type).toBe("json_schema");
       }
     });
-
-    it("should throw an error if the query output type is not 'output-json'", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
-      const badQuery = Kanuni.newQuery()
-        .prompt(p => p.paragraph`This is a test prompt`)
-        .outputText()
-        .build({});
-      
-      // @ts-expect-error - testing with wrong output type
-      expect(() => formatter.format(badQuery)).toThrow(/got 'output-text'/);
-    });
-
-    it("should throw an error if query has no output specified", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
-      const query = Kanuni.newQuery()
-        .prompt(p => p.paragraph`This is a test prompt`)
-        .build({});
-      
-      // @ts-expect-error - testing with no output specified (defaults to output-text)
-      expect(() => formatter.format(query)).toThrow(/got 'output-text'/);
-    });
   });
 
   describe("Complex memory scenarios", () => {
-    it("should handle empty memory gracefully", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+    it("should handle empty memory gracefully (JSON output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m) // empty memory
@@ -333,8 +428,21 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(result.messages[0].role).toBe("system");
     });
 
+    it("should handle empty memory gracefully (text output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .memory(m => m) // empty memory
+        .build({});
+      const result = formatter.format(query);
+      
+      expect(result.messages.length).toBe(1);
+      expect(result.messages[0].role).toBe("system");
+      expect(result.response_format).toBeUndefined();
+    });
+
     it("should handle consecutive utterances from the same role", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m
@@ -362,7 +470,7 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
     });
 
     it("should handle mixed named and unnamed utterances", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => m
@@ -384,11 +492,11 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
   });
 
   describe("Edge cases", () => {
-    it("should handle formatter configuration with all options", () => {
+    it("should handle formatter configuration with all options (JSON output)", () => {
       const customInstructionsFormatter = jest.fn(() => "custom formatted instructions");
       const customRoleMapper = jest.fn((role: string) => role === "user" ? "user" : "assistant");
       
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({
+      const formatter = new AzureOpenAIChatCompletionsFormatter({
         instructionsRole: "developer",
         instructionsFormatter: customInstructionsFormatter,
         roleMapper: customRoleMapper,
@@ -410,8 +518,32 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(result.messages[0].content).toBe("custom formatted instructions");
     });
 
-    it("should handle empty format params", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+    it("should handle formatter configuration with all options (text output)", () => {
+      const customInstructionsFormatter = jest.fn(() => "custom formatted instructions");
+      const customRoleMapper = jest.fn((role: string) => role === "user" ? "user" : "assistant");
+      
+      const formatter = new AzureOpenAIChatCompletionsFormatter({
+        instructionsRole: "developer",
+        instructionsFormatter: customInstructionsFormatter,
+        roleMapper: customRoleMapper,
+      });
+      
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .memory(m => m.utterance("user", () => "test"))
+        .build({});
+      
+      const result = formatter.format(query);
+      
+      expect(customInstructionsFormatter).toHaveBeenCalledWith(query);
+      expect(customRoleMapper).toHaveBeenCalledWith("user", undefined);
+      expect(result.messages[0].role).toBe("developer");
+      expect(result.messages[0].content).toBe("custom formatted instructions");
+      expect(result.response_format).toBeUndefined();
+    });
+
+    it("should handle empty format params (JSON output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const query = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .outputJson(z.strictObject({
@@ -428,8 +560,24 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(result1).toEqual(result3);
     });
 
+    it("should handle empty format params (text output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .build({});
+      
+      // Test that undefined params work the same as empty object
+      const result1 = formatter.format(query);
+      const result2 = formatter.format(query, {});
+      const result3 = formatter.format(query, undefined as any);
+      
+      expect(result1).toEqual(result2);
+      expect(result1).toEqual(result3);
+      expect(result1.response_format).toBeUndefined();
+    });
+
     it("should handle very long conversation histories", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const memoryBuilder = Kanuni.newQuery()
         .prompt(p => p.paragraph`This is a test prompt`)
         .memory(m => {
@@ -461,8 +609,8 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(result.messages[100].content).toBe("Assistant response 49");
     });
 
-    it("should preserve message content exactly as provided", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+    it("should preserve message content exactly as provided (JSON output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const specialContent = "Special chars: 🚀 \n\t\"quotes\" and 'apostrophes' and @mentions #hashtags $variables";
       
       const query = Kanuni.newQuery()
@@ -478,8 +626,23 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
       expect(result.messages[1].content).toBe(specialContent);
     });
 
+    it("should preserve message content exactly as provided (text output)", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      const specialContent = "Special chars: 🚀 \n\t\"quotes\" and 'apostrophes' and @mentions #hashtags $variables";
+      
+      const query = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .memory(m => m.utterance("user", () => specialContent))
+        .build({});
+      
+      const result = formatter.format(query);
+      
+      expect(result.messages[1].content).toBe(specialContent);
+      expect(result.response_format).toBeUndefined();
+    });
+
     it("should handle complex JSON schema with nested objects", () => {
-      const formatter = new AzureOpenAIChatCompletionsJsonFormatter({});
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
       const complexSchema = z.strictObject({
         user: z.strictObject({
           name: z.string(),
@@ -505,6 +668,34 @@ describe("AzureOpenAIChatCompletionsJsonFormatter", () => {
         expect(result.response_format.json_schema.strict).toBe(true);
         expect(result.response_format.json_schema.schema).toBeDefined();
       }
+    });
+
+    it("should handle switching between output types with same formatter instance", () => {
+      const formatter = new AzureOpenAIChatCompletionsFormatter({});
+      
+      // Test text output query
+      const textQuery = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .build({});
+      const textResult = formatter.format(textQuery);
+      
+      // Test JSON output query
+      const jsonQuery = Kanuni.newQuery()
+        .prompt(p => p.paragraph`This is a test prompt`)
+        .outputJson(z.strictObject({
+          response: z.string(),
+        }))
+        .build({});
+      const jsonResult = formatter.format(jsonQuery);
+      
+      // Verify text output has no response_format
+      expect(textResult.response_format).toBeUndefined();
+      expect(textResult.messages[0].content).toContain("This is a test prompt");
+      
+      // Verify JSON output has response_format
+      expect(jsonResult.response_format).toBeDefined();
+      expect(jsonResult.response_format?.type).toBe("json_schema");
+      expect(jsonResult.messages[0].content).toContain("This is a test prompt");
     });
   });
 });

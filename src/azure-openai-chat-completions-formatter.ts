@@ -1,6 +1,5 @@
 import type {
   Formatter,
-  JsonOutput,
   Query,
   Tool,
   ToolCall,
@@ -19,7 +18,7 @@ import {
 import { ZodType } from "zod";
 
 const SUPPORTED_ROLES = ['user', 'assistant'] as const;
-type SupportedRoles = (typeof SUPPORTED_ROLES)[number];
+export type SupportedRoles = (typeof SUPPORTED_ROLES)[number];
 
 // The following checks to make sure that we continue to stay in alignment with
 // the openai library
@@ -29,7 +28,7 @@ type SupportedInstructionsRoles= 'developer' | 'system';
 type ChatCompletionInstructionsRoles = Extract<ChatCompletionRole, SupportedInstructionsRoles>;
 
 export type InstructionsFormatterFunction<
-  OutputSchema extends Record<string, any> = Record<string, any>,
+  OutputSchema extends Record<string, any> | string,
   Role extends string = ChatCompletionUtteranceRoles,
   ToolsType extends Tool<any, any> = never
 > = (query: Query<OutputSchema, Role, ToolsType>) => string;
@@ -37,8 +36,8 @@ export type InstructionsFormatterFunction<
 export type RoleMapperFunction<SourceRole extends string> =
   (sourceRole: SourceRole, name?: string) => ChatCompletionUtteranceRoles;
 
-export type AzureOpenAIChatCompletionsJsonFormatterConfig<
-  OutputSchema extends Record<string, any>,
+export type AzureOpenAIChatCompletionsFormatterConfig<
+  OutputSchema extends Record<string, any> | string,
   Role extends string = ChatCompletionUtteranceRoles,
   ToolsType extends Tool<any, any> = never
 > = {
@@ -65,21 +64,21 @@ export type AzureOpenAIChatCompletionsJsonFormatterConfig<
 
 const DEFAULT_INSTRUCTIONS_ROLE: ChatCompletionInstructionsRoles = "system";
 
-type AzureOpenAIChatCompletionsJsonFormatterParams = {};
+type AzureOpenAIChatCompletionsFormatterParams = {};
 
-type AzureOpenAIChatCompletionsJsonFormatterResult =
+type AzureOpenAIChatCompletionsFormatterResult =
   Pick<Parameters<
     AzureOpenAI['chat']['completions']['parse']>[0],
     'messages' | 'response_format' | 'tools'
   >;
 
-export class AzureOpenAIChatCompletionsJsonFormatter<
-  OutputType extends Record<string, any>,
+export class AzureOpenAIChatCompletionsFormatter<
+  OutputType extends Record<string, any> | string,
   ToolsType extends Tool<any, any> = never,
   Role extends string = ChatCompletionUtteranceRoles,
 > implements Formatter<
-    AzureOpenAIChatCompletionsJsonFormatterParams,
-    AzureOpenAIChatCompletionsJsonFormatterResult,
+    AzureOpenAIChatCompletionsFormatterParams,
+    AzureOpenAIChatCompletionsFormatterResult,
     OutputType,
     Role,
     ToolsType
@@ -94,7 +93,7 @@ export class AzureOpenAIChatCompletionsJsonFormatter<
       instructionsRole = DEFAULT_INSTRUCTIONS_ROLE,
       instructionsFormatter = (query: Query<OutputType, Role, ToolsType>) => new TextualMarkdownFormatter<OutputType, Role, ToolsType>().format(query),
       roleMapper = this.identityRoleMapper,
-    }: AzureOpenAIChatCompletionsJsonFormatterConfig<OutputType, Role, ToolsType> = {},
+    }: AzureOpenAIChatCompletionsFormatterConfig<OutputType, Role, ToolsType> = {},
   ) {
     this.instructionsRole = instructionsRole;
     this.instructionsFormatter = instructionsFormatter;
@@ -111,29 +110,40 @@ export class AzureOpenAIChatCompletionsJsonFormatter<
 
   format(
     query: Query<OutputType, Role, ToolsType>,
-    _params: AzureOpenAIChatCompletionsJsonFormatterParams = {},
-  ): AzureOpenAIChatCompletionsJsonFormatterResult {
+    _params: AzureOpenAIChatCompletionsFormatterParams = {},
+  ): AzureOpenAIChatCompletionsFormatterResult {
     const memoryItems = this.formatMemoryItems(query);
-    const responseJsonSchema = this.formatJsonSchema(query);
     const tools = this.formatTools(query);
+    let responseJsonSchema;
+    switch (query.output.type) {
+      case 'output-text':
+        // the next line is noop: it is here for clarity
+        responseJsonSchema = undefined;
+        break;
+      case 'output-json':
+        responseJsonSchema = this.formatJsonSchema(query);
+        break;
+      default:
+        throw new Error(`Unknown output type: ${(query.output as { type: string; }).type}`);
+    }
 
     return {
       messages: memoryItems,
-      response_format: responseJsonSchema,
-      tools,
+      ...(responseJsonSchema === undefined ? {} : { response_format: responseJsonSchema }),
+      ...(tools === undefined ? {} : { tools }),
     };
   }
 
   formatTools(
     query: Query<OutputType, Role, ToolsType>
-  ): AzureOpenAIChatCompletionsJsonFormatterResult['tools'] {
+  ): AzureOpenAIChatCompletionsFormatterResult['tools'] {
     const toolRegistry = query.tools;
 
     if (toolRegistry === undefined || Object.keys(toolRegistry).length === 0) {
       return [];
     }
 
-    return Object.values(toolRegistry).map(tool => ({
+    return Object.values<ToolsType>(toolRegistry).map(tool => ({
       type: 'function',
       function: {
         name: tool.name,
@@ -147,7 +157,7 @@ export class AzureOpenAIChatCompletionsJsonFormatter<
   // TODO: Extend this to support other types of memory items, i.e. tools, when they are implemented.
   private formatMemoryItems(
     query: Query<OutputType, Role, ToolsType>,
-  ): AzureOpenAIChatCompletionsJsonFormatterResult['messages'] {
+  ): AzureOpenAIChatCompletionsFormatterResult['messages'] {
     const instructionsRole = this.instructionsRole;
     const instructions = this.instructionsFormatter(query);
 
@@ -346,7 +356,7 @@ export class AzureOpenAIChatCompletionsJsonFormatter<
   }
 
   private formatJsonSchema(
-    query: Query<OutputType, any, any>,
+    query: Query<any, any, any>,
   ): AutoParseableResponseFormat<OutputType> {
     // This formatter is designed to work with queries that have a json output.
     // If the query does not have output schema set, throw an error.
@@ -360,10 +370,9 @@ export class AzureOpenAIChatCompletionsJsonFormatter<
       );
     }
 
-    const jsonOutput = output as JsonOutput<OutputType>; // this is because typescript somehow can't infer this type
     return zodResponseFormat<ZodType<OutputType>>(
-      jsonOutput.schema,
-      jsonOutput.schemaName,
+      output.schema,
+      output.schemaName,
     );
   }
 }
