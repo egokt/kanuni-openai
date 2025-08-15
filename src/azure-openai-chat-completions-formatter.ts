@@ -6,16 +6,19 @@ import type {
 } from "kanuni";
 import { TextualMarkdownFormatter } from "kanuni";
 import { AzureOpenAI } from "openai";
+import { zodToJsonSchema } from "openai/_vendor/zod-to-json-schema/zodToJsonSchema.mjs";
 import { zodResponseFormat } from "openai/helpers/zod.js";
 import { AutoParseableResponseFormat } from "openai/lib/parser.js";
 import {
   ChatCompletionAssistantMessageParam,
   ChatCompletionMessageToolCall,
   ChatCompletionRole,
+  ChatCompletionTool,
   ChatCompletionToolMessageParam,
   ChatCompletionUserMessageParam,
 } from "openai/resources";
 import { ZodType } from "zod";
+import z from "zod/v3";
 
 const SUPPORTED_ROLES = ['user', 'assistant'] as const;
 export type SupportedRoles = (typeof SUPPORTED_ROLES)[number];
@@ -148,9 +151,16 @@ export class AzureOpenAIChatCompletionsFormatter<
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: tool.parameters,
+        parameters: zodToJsonSchema(z.strictObject(tool.parameters), {
+          openaiStrictMode: true,
+          name: tool.name,
+          nameStrategy: 'duplicate-ref',
+          $refStrategy: 'extract-to-root',
+          nullableStrategy: 'property',
+        }),
+        strict: true,
       }
-    }));
+    } as ChatCompletionTool));
   }
 
   // Warn: This method only supports utterances in the memory section.
