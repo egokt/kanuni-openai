@@ -309,7 +309,7 @@ export class AzureOpenAIChatCompletionsFormatter<
                   };
                   break;
                 default:
-                  throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsJsonFormatter`);
+                  throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsFormatter.`);
               }
             }
           } else {
@@ -328,7 +328,7 @@ export class AzureOpenAIChatCompletionsFormatter<
                 };
                 break;
               default:
-                throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsJsonFormatter`);
+                throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsFormatter.`);
             }
           }
           break;
@@ -408,7 +408,7 @@ export class AzureOpenAIChatCompletionsFormatter<
               tool_call_id: toolCallResult.toolCallId,
             } as ChatCompletionToolMessageParam));
           default:
-            throw new Error(`Internal error in AzureOpenAIChatCompletionsJsonFormatter.`);
+            throw new Error(`Internal error in AzureOpenAIChatCompletionsFormatter.`);
         }
       }).flat(),
     ];
