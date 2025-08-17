@@ -309,7 +309,7 @@ export class AzureOpenAIChatCompletionsFormatter<
                   };
                   break;
                 default:
-                  throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsFormatter`);
+                  throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsFormatter.`);
               }
             }
           } else {
@@ -328,7 +328,7 @@ export class AzureOpenAIChatCompletionsFormatter<
                 };
                 break;
               default:
-                throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsFormatter`);
+                throw new Error(`Only user and assistant utterances are supported by AzureOpenAIChatCompletionsFormatter.`);
             }
           }
           break;
