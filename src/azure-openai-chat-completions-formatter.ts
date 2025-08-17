@@ -20,36 +20,63 @@ import {
 import { ZodType } from "zod";
 import z from "zod/v3";
 
+/**
+ * The roles that this formatter supports for utterences in Kanuni.
+ * These are also the ones that are the user and assistant types for
+ * OpenAI messages.
+ */
 const SUPPORTED_ROLES = ['user', 'assistant'] as const;
+/**
+ * Roles that this formatter supports for utterances in Kanuni.
+ */
 export type SupportedRoles = (typeof SUPPORTED_ROLES)[number];
 
-// The following checks to make sure that we continue to stay in alignment with
-// the openai library
+// The following type definition checks to make sure that we continue to stay
+// in alignment with the openai library.
 type ChatCompletionUtteranceRoles = Extract<ChatCompletionRole, SupportedRoles>;
 
+/**
+ * Supported OpenAI message types for instructions.
+ */
 type SupportedInstructionsRoles= 'developer' | 'system';
+
+// The following type definition checks to make sure that we continue to stay
+// in alignment with the openai library.
 type ChatCompletionInstructionsRoles = Extract<ChatCompletionRole, SupportedInstructionsRoles>;
 
+/**
+ * Type of the function that's used for formatting the instructions, which is
+ * the "prompt" part of the Kanuni query.
+ */
 export type InstructionsFormatterFunction<
   OutputSchema extends Record<string, any> | string,
   Role extends string = ChatCompletionUtteranceRoles,
   ToolsType extends Tool<any, any> = never
 > = (query: Query<OutputSchema, Role, ToolsType>) => string;
 
+/**
+ * Type of the function that is used for mapping roles used in Kanuni query
+ * to the supported roles in this formatter. See {@see SupportedRoles}.
+ */
 export type RoleMapperFunction<SourceRole extends string> =
   (sourceRole: SourceRole, name?: string) => ChatCompletionUtteranceRoles;
 
+/**
+ * The type of the configuration object this formatter accepts.
+ */
 export type AzureOpenAIChatCompletionsFormatterConfig<
   OutputSchema extends Record<string, any> | string,
   Role extends string = ChatCompletionUtteranceRoles,
   ToolsType extends Tool<any, any> = never
 > = {
   /**
-   * Post o1 models use "developer", others use "system". Default is "system". Check which role your model uses for instructions.
+   * Post o1 models use "developer", others use "system". Default is "system".
+   * Check which role your model uses for instructions.
    */
   instructionsRole?: ChatCompletionInstructionsRoles;
 
-  // TODO: add model and version params so that the formatter can adapt to different OpenAI models and versions.
+  // TODO: add model and version params so that the formatter can adapt to
+  // different OpenAI models and versions.
 
   /**
    * Formats the instructions for the query.
@@ -62,13 +89,24 @@ export type AzureOpenAIChatCompletionsFormatterConfig<
    */
   instructionsFormatter?: InstructionsFormatterFunction<OutputSchema, Role, ToolsType>;
 
+  /**
+   * Maps the role used in the Kanuni query to the supported roles in this formatter.
+   * 
+   * The default is an identity function that maps the kanuni role to the same role name.
+   * 
+   * @param sourceRole The role used in the Kanuni query.
+   * @param name The name of the role, if any.
+   * @returns The mapped role that is supported by this formatter.
+   */
   roleMapper?: RoleMapperFunction<Role>;
 }
 
+/**
+ * The default message type to use for instructions.
+ */
 const DEFAULT_INSTRUCTIONS_ROLE: ChatCompletionInstructionsRoles = "system";
 
 type AzureOpenAIChatCompletionsFormatterParams = {};
-
 type AzureOpenAIChatCompletionsFormatterResult =
   Pick<Parameters<
     AzureOpenAI['chat']['completions']['parse']>[0],
@@ -87,8 +125,22 @@ export class AzureOpenAIChatCompletionsFormatter<
     ToolsType
   >
 {
+  /**
+   * The OpenAI message type to use for the instructions.
+   */
   private instructionsRole: ChatCompletionInstructionsRoles;
+
+  /**
+   * The formatter to use for generating the instructions.
+   * Default is TextualMarkdownFormatter from Kanuni.
+   */
   private instructionsFormatter: InstructionsFormatterFunction<OutputType, Role, ToolsType>;
+
+  /**
+   * The role mapper to use for mapping Kanuni query roles to the
+   * supported roles in this formatter.
+   * Default is the identity mapping function.
+   */
   private roleMapper: RoleMapperFunction<Role>;
 
   constructor(
@@ -103,6 +155,13 @@ export class AzureOpenAIChatCompletionsFormatter<
     this.roleMapper = roleMapper;
   }
 
+  /**
+   * The identity role mapping function used as a default value for the
+   * role mapper in this formatter.
+   * 
+   * @param sourceRole Role used in the query.
+   * @returns Message type to use for the role in OpenAI messages.
+   */
   private identityRoleMapper(sourceRole: Role): SupportedRoles {
     const mappedRole = SUPPORTED_ROLES.find(role => role === sourceRole);
     if (mappedRole !== undefined) {
@@ -111,6 +170,15 @@ export class AzureOpenAIChatCompletionsFormatter<
     throw new Error(`Unknown role: ${sourceRole}`);
   }
 
+  /**
+   * Format the given query into parameters for OpenAI chat completions API.
+   * 
+   * @param query Kanuni query context.
+   * @param _params Currently unused in this formatter. Normally additional
+   * parameters for the formatter.
+   * @returns Parameters that can be passed to openai.chat.completions
+   * functions.
+   */
   format(
     query: Query<OutputType, Role, ToolsType>,
     _params: AzureOpenAIChatCompletionsFormatterParams = {},
@@ -137,7 +205,15 @@ export class AzureOpenAIChatCompletionsFormatter<
     };
   }
 
-  formatTools(
+  /**
+   * Format the tools from the given query into the format that is acceptable
+   * by OpenAI chat completions API.
+   * 
+   * @param query Kanuni query with tools.
+   * @returns Tool definitions that can be used with OpenAI chat completions
+   * API.
+   */
+  private formatTools(
     query: Query<OutputType, Role, ToolsType>
   ): AzureOpenAIChatCompletionsFormatterResult['tools'] {
     const toolRegistry = query.tools;
@@ -151,23 +227,37 @@ export class AzureOpenAIChatCompletionsFormatter<
       function: {
         name: tool.name,
         description: tool.description,
-        parameters: zodToJsonSchema(z.strictObject(tool.parameters), {
-          openaiStrictMode: true,
-          name: tool.name,
-          nameStrategy: 'duplicate-ref',
-          $refStrategy: 'extract-to-root',
-          nullableStrategy: 'property',
-        }),
+        parameters:
+          // These parameters are taken from the method used within openai
+          // library for formatting zod definitions to json schemas.
+          zodToJsonSchema(z.strictObject(tool.parameters), {
+            openaiStrictMode: true,
+            name: tool.name,
+            nameStrategy: 'duplicate-ref',
+            $refStrategy: 'extract-to-root',
+            nullableStrategy: 'property',
+          }),
         strict: true,
       }
     } as ChatCompletionTool));
   }
 
-  // Warn: This method only supports utterances in the memory section.
-  // TODO: Extend this to support other types of memory items, i.e. tools, when they are implemented.
+  /**
+   * Format the memory items from the given query into the format that is
+   * acceptable by OpenAI chat completions API.
+   * 
+   * @param query Kanuni query with memory items.
+   * @returns Array of messages that can be used with OpenAI chat completions.
+   */
   private formatMemoryItems(
     query: Query<OutputType, Role, ToolsType>,
   ): AzureOpenAIChatCompletionsFormatterResult['messages'] {
+    // A note about what this method does:
+    // The tool calls are represented as individual memory items in the Kanuni's
+    // memory representation. However, OpenAI represents tool calls within the
+    // assistant message. Hence, this method regroups Kanuni memory items before
+    // converting them to OpenAI messages.
+
     const instructionsRole = this.instructionsRole;
     const instructions = this.instructionsFormatter(query);
 
@@ -321,29 +411,6 @@ export class AzureOpenAIChatCompletionsFormatter<
             throw new Error(`Internal error in AzureOpenAIChatCompletionsJsonFormatter.`);
         }
       }).flat(),
-      // ...(query.memory?.contents || []).map((item) => {
-      //   switch (item.type) {
-      //     case "utterance":
-      //       const role = this.roleMapper(item.role, item.name);
-      //       if (!UTTERANCE_ROLES[role]) {
-      //         throw new Error(`Role mapping for '${item.role}' resulted in unknown utterance role: ${role}`);
-      //       }
-      //       return {
-      //         role: role as UtteranceRole, // this type casting is safe due to the conditional above
-      //         ...(item.name !== undefined && item.name !== '' ? { name: item.name } : {}),
-      //         content: item.contents,
-      //       };
-      //     case 'tool-call':
-      //       return {
-
-      //       };
-      //       break;
-      //     case 'tool-call-result':
-      //       break;
-      //     default:
-      //       throw new Error(`Unknown memory item type: ${item.type}`);
-      //   }
-      // }),
     ];
 
     return memoryItems;
@@ -353,8 +420,10 @@ export class AzureOpenAIChatCompletionsFormatter<
    * Convert the given tool call to the format acceptable by openai library.
    * 
    * @param toolCall The tool call in Kanuni format.
+   * @returns Tool call in the format that is acceptable by OpenAI chat
+   * completions API.
    */
-  formatToolCall(toolCall: ToolCall<ToolsType["name"]>): ChatCompletionMessageToolCall {
+  private formatToolCall(toolCall: ToolCall<ToolsType["name"]>): ChatCompletionMessageToolCall {
     return {
       id: toolCall.toolCallId,
       type: 'function',
@@ -365,6 +434,14 @@ export class AzureOpenAIChatCompletionsFormatter<
     };
   }
 
+  /**
+   * Format the json output schema from the given query into the format
+   * that is acceptable by OpenAI chat completions API.
+   * 
+   * @param query Kanuni query with output schema defined.
+   * @returns Parsable response format that can be used with OpenAI chat
+   * completions API, especially the `parse` method.
+   */
   private formatJsonSchema(
     query: Query<any, any, any>,
   ): AutoParseableResponseFormat<OutputType> {
