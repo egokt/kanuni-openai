@@ -1,6 +1,10 @@
 export {
-  AzureOpenAIChatCompletionsJsonFormatter,
-  AzureOpenAIChatCompletionsJsonFormatterConfig,
+  AzureOpenAIChatCompletionsFormatter,
+  AzureOpenAIChatCompletionsFormatterConfig,
   InstructionsFormatterFunction,
   RoleMapperFunction,
-} from './azure-openai-chat-completions-json-formatter.js';
+} from './azure-openai-chat-completions-formatter.js';
+
+export type {
+  SupportedRoles
+} from './azure-openai-chat-completions-formatter.js';
